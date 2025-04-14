@@ -1,0 +1,29 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+*.egg
+*.log
+.venv/
+.env
+
+# Output directories
+output/
+temp_repo/
+
+# Jupyter (혹시 쓸 경우)
+.ipynb_checkpoints/
+
+# macOS
+.DS_Store
+
+# VSCode
+.vscode/
+
+# PyCharm
+.idea/
+
+# Docker artifacts
+*.pid
+*.tar
+docker-compose.override.yml
