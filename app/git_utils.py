@@ -2,8 +2,14 @@
 
 import os
 import shutil
+import stat
 from git import Repo
 
+
+def remove_readonly(func, path, exc_info):
+    # 파일의 속성을 쓰기 가능하도록 변경 후 재시도
+    os.chmod(path, stat.S_IWRITE)
+    func(path)
 
 def clone_repo(repo_url: str, target_dir: str) -> str:
     """
@@ -18,10 +24,11 @@ def clone_repo(repo_url: str, target_dir: str) -> str:
         str: 클론된 저장소의 경로.
     """
     if os.path.exists(target_dir):
-        shutil.rmtree(target_dir)
+        shutil.rmtree(target_dir, onerror=remove_readonly)
     print(f"Cloning repository from {repo_url} into {target_dir} ...")
     Repo.clone_from(repo_url, target_dir)
     return os.path.abspath(target_dir)
+
 
 
 def get_all_commits(repo_path: str) -> list:

@@ -23,8 +23,13 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# 앱 코드 복사
-COPY app/ /app
+# 앱 코드 복사: 'app' 폴더 전체를 복사하여 /app/app에 위치시키기
+COPY app /app
+
+# 테스트 코드 복사
+COPY tests /tests
+
+COPY tests/quickstart.xml /app/quickstart.xml
 
 # 실행
-ENTRYPOINT ["python", "main.py"]
+ENTRYPOINT ["python", "/app/main.py"]
