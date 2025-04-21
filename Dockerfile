@@ -1,14 +1,10 @@
-```dockerfile
-# Python 베이스 이미지 사용
 FROM python:3.9-slim
 
-# 시스템 업데이트 및 Git, Java(OpenJDK) 설치
 RUN apt-get update && apt-get install -y --no-install-recommends \
     git \
     openjdk-11-jre-headless \
     && rm -rf /var/lib/apt/lists/*
 
-# PMD 다운로드 및 설치 (버전은 최신 또는 필요한 버전으로 변경)
 ARG PMD_VERSION=7.0.0
 WORKDIR /app
 RUN apt-get update && apt-get install -y --no-install-recommends wget unzip && \
@@ -18,23 +14,20 @@ RUN apt-get update && apt-get install -y --no-install-recommends wget unzip && \
     apt-get purge -y --auto-remove wget unzip && \
     rm -rf /var/lib/apt/lists/*
 
-# 애플리케이션 코드 및 요구사항 파일 복사
 COPY requirements.txt .
 COPY pmd_analyzer.py .
-# 필요하다면 기본 규칙셋 파일도 복사
 # COPY my_ruleset.xml .
 
-# Python 의존성 설치
+
 RUN pip install --no-cache-dir -r requirements.txt
 
-# 작업 디렉토리 설정
+
 WORKDIR /app
 
-# 기본 실행 명령 (필요에 따라 ENTRYPOINT 또는 CMD 수정)
-# 실행 시 인자를 전달받도록 ENTRYPOINT 사용
+
 ENTRYPOINT ["python", "pmd_analyzer.py"]
 
-# 사용 예시를 위한 기본 CMD (실제 실행 시에는 run 명령어에서 인자로 덮어씀)
+
 # CMD ["https://github.com/apache/commons-lang", "-p", "/app/pmd-bin-7.0.0/bin/pmd", "-r", "/app/category/java/bestpractices.xml", "-o", "/app/output"]
 
 
