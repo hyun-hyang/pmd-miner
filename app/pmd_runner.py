@@ -5,7 +5,7 @@ import tempfile
 from lxml import etree
 
 
-def run_pmd(repo_path: str, ruleset: str, verbose: bool = False) -> tuple:
+def run_pmd(repo_path: str, ruleset: str) -> tuple:
     """
     해당 repository (repo_path)에 대해 PMD를 실행하여 정적 분석 경고를 수집하고,
     repository 내의 Java 파일 수와 함께 결과를 반환한다.
@@ -13,7 +13,6 @@ def run_pmd(repo_path: str, ruleset: str, verbose: bool = False) -> tuple:
     Args:
         repo_path (str): 분석할 Git 저장소의 로컬 경로.
         ruleset (str): PMD 룰셋 XML 파일 경로.
-        verbose (bool): verbose 모드(-debug) 활성화 여부.
 
     Returns:
         tuple: (warnings_dict, java_file_count)
@@ -24,6 +23,9 @@ def run_pmd(repo_path: str, ruleset: str, verbose: bool = False) -> tuple:
         for file in files:
             if file.endswith(".java"):
                 java_file_count += 1
+    # Java 파일이 하나도 없으면 PMD 실행 건너뛰기
+    if java_file_count == 0:
+        return {"files": []}, java_file_count
 
     # PMD 실행 커맨드를 실행파일 이름 (Docker 환경에서는 PATH에 추가되어 있으므로 "pmd"로 사용)
     pmd_exec = "pmd"
@@ -43,10 +45,10 @@ def run_pmd(repo_path: str, ruleset: str, verbose: bool = False) -> tuple:
     temp_report.close()
 
     # 5. PMD 명령어 구성
-    # 이미 "-D" 옵션으로 필요한 JAVA 옵션들을 전달하고 있으므로, verbose 옵션은 추가 시 중복되지 않도록 합니다.
     command = [
         pmd_exec,
         "check",
+        "--use-version", "java-24-preview",
         "-d", repo_path,
         "-R", rule_argument,
         "-f", "xml",
@@ -54,18 +56,6 @@ def run_pmd(repo_path: str, ruleset: str, verbose: bool = False) -> tuple:
         "-D", "pmd.website.baseurl=https://pmd.github.io",
         "-D", "pmd.incrementalAnalysis=false"
     ]
-
-    if verbose and "-debug" not in command:
-        command.append("-debug")
-
-    # # 만약 verbose 모드가 활성화된 경우, 이미 리스트에 "-debug"가 없는지 확인 후 추가
-    # if verbose and "-debug" not in command:
-    #     command.append("-debug")
-    #
-    # # 디버깅을 위해 실행할 커맨드를 로그로 출력할 수 있습니다.
-    # if verbose:
-    #     print("Executing PMD command: ", " ".join(command))
-
     # 6. JAVA_OPTS 환경변수 제거 (증분 분석 옵션 관련 문제 방지를 위해)
     env = os.environ.copy()
     if "JAVA_OPTS" in env:
@@ -83,8 +73,10 @@ def run_pmd(repo_path: str, ruleset: str, verbose: bool = False) -> tuple:
         )
         if result.returncode != 0:
             print("Error running PMD:", result.stderr.strip())
+            return {"files": []}, java_file_count
     except Exception as e:
         print("Exception while running PMD:", str(e))
+        return {"files": []}, java_file_count
 
     # 8. PMD 결과 XML 파일 읽기
     xml_output = ""

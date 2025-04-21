@@ -11,7 +11,6 @@ def main():
     parser.add_argument("--ruleset", required=True, help="Path to PMD ruleset XML file")
     parser.add_argument("--output_dir", required=True, help="Directory to save JSON output files")
     parser.add_argument("--temp_dir", default="./temp_repo", help="Temporary directory for cloning repository")
-    parser.add_argument("--verbose", action="store_true", help="Run PMD in verbose (debug) mode")
 
     args = parser.parse_args()
 
@@ -30,11 +29,48 @@ def main():
     if not os.path.exists(args.output_dir):
         os.makedirs(args.output_dir)
 
+    # # 기존 for 루프 대신, 첫 번째 commit만 처리 (예시)
+    # if commits:
+    #     commit_hash = commits[0]  # 또는 테스트할 commit 해시 직접 지정
+    #     print(f"Processing commit: {commit_hash} ...")
+    #     checkout_commit(repo_path, commit_hash)
+    #     warnings_dict, java_file_count = run_pmd(repo_path, args.ruleset)
+    #
+    #     commit_file = os.path.join(args.output_dir, f"{commit_hash}.json")
+    #     with open(commit_file, "w", encoding="utf-8") as f:
+    #         f.write(parse_pmd_output(warnings_dict))
+    #
+    #     # Summary 업데이트
+    #     summary.add_commit(java_file_count, warnings_dict)
+    #     # 결과 기록 등 처리
+    #
+    #     commit_hash = commits[1]  # 또는 테스트할 commit 해시 직접 지정
+    #     print(f"Processing commit: {commit_hash} ...")
+    #     checkout_commit(repo_path, commit_hash)
+    #     warnings_dict, java_file_count = run_pmd(repo_path, args.ruleset)
+    #
+    #     commit_file = os.path.join(args.output_dir, f"{commit_hash}.json")
+    #     with open(commit_file, "w", encoding="utf-8") as f:
+    #         f.write(parse_pmd_output(warnings_dict))
+    #
+    #     # Summary 업데이트
+    #     summary.add_commit(java_file_count, warnings_dict)
+    #     # 결과 기록 등 처리
+    # else:
+    #     print("No commits found.")
+    #
+    # # 전체 결과를 summary.json 파일로 저장
+    # summary_file = os.path.join(args.output_dir, "summary.json")
+    # summary.save(summary_file, os.path.abspath(args.output_dir))
+    #
+    # print("Processing complete.")
+    # print("Summary saved to:", summary_file)
+
     # 각 커밋마다 PMD 분석 실행
     for idx, commit_hash in enumerate(commits):
         print(f"[{idx + 1}/{len(commits)}] Processing commit: {commit_hash} ...")
         checkout_commit(repo_path, commit_hash)
-        warnings_dict, java_file_count = run_pmd(repo_path, args.ruleset, verbose=False)
+        warnings_dict, java_file_count = run_pmd(repo_path, args.ruleset)
 
         # 커밋별 결과를 JSON 파일로 저장
         commit_file = os.path.join(args.output_dir, f"{commit_hash}.json")
