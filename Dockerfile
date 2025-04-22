@@ -45,6 +45,9 @@ WORKDIR /app
 # Assuming your script is named analyze_repository_parallel.py
 COPY app/pmd_analyzer_parallel.py .
 
+
+COPY libs /opt/pmd_libs
+
 # 6. Define Entrypoint
 # The container will run the python script by default
 ENTRYPOINT ["python3", "/app/pmd_analyzer_parallel.py"]
