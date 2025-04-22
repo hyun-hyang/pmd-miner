@@ -24,7 +24,7 @@ ARG PMD_HOME=/opt/pmd
 
 RUN wget --no-verbose ${PMD_URL} -O /tmp/pmd.zip \
  && unzip /tmp/pmd.zip -d /opt \
- && mv "/opt/pmd-dist-${PMD_VERSION}-bin" "${PMD_HOME}" \
+ && mv "/opt/pmd-bin-${PMD_VERSION}" "${PMD_HOME}" \
  && rm /tmp/pmd.zip \
  && chmod +x ${PMD_HOME}/bin/pmd \
  && ln -s ${PMD_HOME}/bin/pmd /usr/local/bin/pmd \
