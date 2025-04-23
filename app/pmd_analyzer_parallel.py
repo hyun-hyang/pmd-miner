@@ -9,6 +9,7 @@ import traceback
 from pathlib import Path
 from multiprocessing import Pool, Manager, Lock, current_process
 from datetime import datetime
+import requests
 
 
 logging.basicConfig(level=logging.INFO,
@@ -16,6 +17,19 @@ logging.basicConfig(level=logging.INFO,
                     datefmt='%Y-%m-%d %H:%M:%S')
 logger = logging.getLogger(__name__)
 
+def run_pmd_analysis_http(worktree_path, ruleset, aux_classpath, timeout=600):
+    """
+    PMD Daemon에 HTTP POST 요청을 보내고 JSON 리포트를 dict로 반환.
+    """
+    url = "http://localhost:8000/analyze"
+    payload = {
+        "path": str(worktree_path),
+        "ruleset": str(ruleset),
+        "auxClasspath": aux_classpath or ""
+    }
+    resp = requests.post(url, json=payload, timeout=timeout)
+    resp.raise_for_status()
+    return resp.json()
 
 def run_command(command, cwd=None, check=True, suppress_stderr=False):
     cmd_str = ' '.join(map(str, command))
@@ -78,174 +92,71 @@ def get_commit_hashes(repo_path):
 
 def analyze_commit(args):
     commit_hash, base_repo_path, worktree_path, pmd_path, ruleset, aux_classpath, output_dir, pmd_results_dir, progress_lock, progress_data, worktree_lock = args
+
     worker_name = current_process().name
     start_time = time.time()
     commit_short = commit_hash[:8]
     result_file = pmd_results_dir / f"{commit_hash}.json"
     error_file = pmd_results_dir / f"{commit_hash}.error.json"
 
-
+    # Skip if already done
     if result_file.exists() or error_file.exists():
-        logger.info(f"[{worker_name}] - Skipping commit {commit_short}: result or error file already exists.")
         with progress_lock:
             progress_data['processed'] += 1
-            processed = progress_data['processed']
-            total = progress_data['total']
-            if processed % 100 == 0 or processed == total:
-                 logger.info(f"[MainProcess] - Progress: {processed}/{total} commits processed.")
-        return commit_hash, 0, True, None
+        return commit_hash, 0.0, True, 0
 
-    logger.info(f"[{worker_name}] - Processing commit {commit_short} in {worktree_path.name}")
+    logger.info(f"[{worker_name}] - Processing commit {commit_short}")
 
-    pmd_exit_code = -1
-    analysis_successful = False
-
+    # Checkout
     try:
-        # --- Acquire Lock for Git Operations ---
         with worktree_lock:
-            logger.debug(f"[{worker_name}] - Acquired lock for {worktree_path.name} (checkout)")
-            run_command(['git', 'checkout', '-f', commit_hash], cwd=worktree_path, suppress_stderr=True, check=True)
-            logger.debug(f"[{worker_name}] - Checked out {commit_short} in {worktree_path.name}")
-        # --- Release Lock after Git Checkout ---
-        logger.debug(f"[{worker_name}] - Released lock for {worktree_path.name} after checkout")
-
-
-
-        # --- Skip commits with no Java source files ---
-
-        wt = Path(worktree_path)
-        java_files = list(wt.rglob("*.java"))
-
-        if not java_files:
-            # Java 파일이 없는 커밋에도 빈 JSON 생성
-            placeholder = {
-                "commit": commit_hash,
-                "num_java_files": 0,
-                "warnings": []
-            }
-            try:
-                with open(result_file, 'w', encoding='utf-8') as f:
-                    json.dump(placeholder, f, indent=2)
-            except IOError as e:
-                logger.error(f"[{worker_name}] - Failed to write empty result for {commit_short}: {e}")
-
-            with progress_lock:
-                progress_data['processed'] += 1
-                processed = progress_data['processed']
-                total = progress_data['total']
-                if processed % 100 == 0 or processed == total:
-                    logger.info(f"[MainProcess] - Progress: {processed}/{total} commits processed.")
-            return commit_hash, 0, True, None
-
-
-
-        # Define PMD command arguments
-        pmd_command = [
-            str(pmd_path),
-            'check',
-            '--aux-classpath', aux_classpath or "",
-            '--dir', str(worktree_path),
-            '--rulesets', str(ruleset),
-            '--format', 'json',
-            '--report-file', str(result_file),
-            '--encoding', 'UTF-8',
-            '--no-cache',
-            '--no-fail-on-error',
-            # "--verbose",  # ← 추가!
-            # '--debug'
-        ]
-
-        pmd_result = run_command(pmd_command, cwd=worktree_path, check=False)
-        pmd_exit_code = pmd_result.returncode # Store the exit code
-
-        if pmd_exit_code in [0, 4]:
-            analysis_successful = True
-            if not result_file.exists():
-                logger.warning(f"[{worker_name}] - PMD ran for commit {commit_short} but report file {result_file} was not created. Exit code: {pmd_exit_code}.")
-                try:
-                    with open(result_file, 'w') as f_empty:
-                        json.dump({"commit": commit_hash, "processing_info": f"PMD exited with code {pmd_exit_code} but no report file generated.", "files": []}, f_empty, indent=2)
-                except IOError as e:
-                    logger.error(f"[{worker_name}] - Failed to write placeholder result file {result_file}: {e}")
-
-
-        else:
-            analysis_successful = False
-            logger.error(f"[{worker_name}] - PMD execution failed for {worktree_path.name} (commit {commit_short}) with code {pmd_exit_code}")
-            if result_file.exists():
-                 try: result_file.unlink()
-                 except OSError as e: logger.error(f"[{worker_name}] - Failed to remove potentially incomplete result file {result_file}: {e}")
-
-            error_info = {
-                "commit": commit_hash,
-                "error": f"PMD execution failed with code {pmd_exit_code}",
-                "return_code": pmd_exit_code,
-                "stderr": pmd_result.stderr.strip() if hasattr(pmd_result, 'stderr') else "N/A",
-                "stdout": pmd_result.stdout.strip() if hasattr(pmd_result, 'stdout') else "N/A"
-            }
-            try:
-                with open(error_file, 'w') as f_err:
-                    json.dump(error_info, f_err, indent=2)
-            except IOError as e:
-                logger.error(f"[{worker_name}] - Failed to write error file {error_file}: {e}")
-
-            try:
-                with worktree_lock:
-                     logger.debug(f"[{worker_name}] - Acquired lock for {worktree_path.name} (reset after PMD error)")
-                     run_command(['git', 'reset', '--hard'], cwd=worktree_path, suppress_stderr=True, check=True)
-                     logger.info(f"[{worker_name}] - Successfully reset worktree {worktree_path.name} after PMD error.")
-
-                logger.debug(f"[{worker_name}] - Released lock for {worktree_path.name} after reset")
-            except Exception as reset_e:
-                 logger.error(f"[{worker_name}] - Failed to reset worktree {worktree_path.name} after PMD error: {reset_e}")
-
-    except subprocess.CalledProcessError as e:
-        logger.error(f"[{worker_name}] - Git command failed for commit {commit_short} in {worktree_path.name}: {e}")
-        if "index.lock" in str(e.stderr):
-             logger.error(f"[{worker_name}] - LOCK FILE ERROR DETECTED for {worktree_path.name}. This suggests concurrent git access conflict.")
-        error_info = {
-            "commit": commit_hash,
-            "error": "Git command failed",
-            "command": ' '.join(map(str, e.cmd)),
-            "return_code": e.returncode,
-            "stderr": e.stderr.strip() if hasattr(e, 'stderr') else "N/A",
-            "stdout": e.stdout.strip() if hasattr(e, 'stdout') else "N/A"
-        }
-        try:
-            with open(error_file, 'w') as f_err:
-                 json.dump(error_info, f_err, indent=2)
-        except IOError as io_e:
-             logger.error(f"[{worker_name}] - Failed to write git error file {error_file}: {io_e}")
-        return commit_hash, 0, False, pmd_exit_code
+            run_command(['git', 'checkout', '-f', commit_hash],
+                        cwd=worktree_path, suppress_stderr=True, check=True)
     except Exception as e:
-        logger.error(f"[{worker_name}] - Unexpected error processing commit {commit_short} in {worktree_path.name}: {e}", exc_info=True)
+        logger.error(f"[{worker_name}] - Git checkout failed for {commit_short}: {e}")
+        with open(error_file, 'w', encoding='utf-8') as f:
+            json.dump({"commit": commit_hash, "error": "Git checkout failed"}, f, indent=2)
+        return commit_hash, 0.0, False, -1
 
-        error_info = {
-            "commit": commit_hash,
-            "error": f"Unexpected Python error: {type(e).__name__}",
-            "message": str(e),
-            "traceback": traceback.format_exc()
-        }
-        try:
-             with open(error_file, 'w') as f_err:
-                  json.dump(error_info, f_err, indent=2)
-        except IOError as io_e:
-             logger.error(f"[{worker_name}] - Failed to write unexpected error file {error_file}: {io_e}")
-        return commit_hash, 0, False, pmd_exit_code
+    # Gather Java files
+    java_files = list(Path(worktree_path).rglob("*.java"))
+    if not java_files:
+        placeholder = {"commit": commit_hash, "num_java_files": 0, "warnings": []}
+        with open(result_file, 'w', encoding='utf-8') as f:
+            json.dump(placeholder, f, indent=2)
+        with progress_lock:
+            progress_data['processed'] += 1
+        return commit_hash, 0.0, True, 0
 
-    end_time = time.time()
-    duration = end_time - start_time
-    if analysis_successful:
-         logger.info(f"[{worker_name}] - Commit {commit_short} processed in {duration:.2f}s.")
+    # HTTP 호출로 PMD 분석
+    try:
+        report = run_pmd_analysis_http(worktree_path, ruleset, aux_classpath)
+        with open(result_file, 'w', encoding='utf-8') as f:
+            json.dump(report, f, indent=2)
+        analysis_successful = True
+        pmd_code = 0
+    except Exception as e:
+        logger.error(f"[{worker_name}] - HTTP PMD analysis failed for {commit_short}: {e}")
+        with open(error_file, 'w', encoding='utf-8') as f:
+            json.dump({"commit": commit_hash, "error": str(e)}, f, indent=2)
+        analysis_successful = False
+        pmd_code = -1
 
+    # Finish timing & progress
+    duration = time.time() - start_time
     with progress_lock:
         progress_data['processed'] += 1
         processed = progress_data['processed']
         total = progress_data['total']
         if processed % 100 == 0 or processed == total:
-            logger.info(f"[MainProcess] - Progress: {processed}/{total} commits processed.")
+            logger.info(f"[MainProcess] - Progress: {processed}/{total}")
 
-    return commit_hash, duration if analysis_successful else 0, analysis_successful, pmd_exit_code
+    return commit_hash, (duration if analysis_successful else 0.0), analysis_successful, pmd_code
+
+
+
+
+
 
 def generate_summary_json(output_dir, pmd_results_dir):
     """
@@ -547,7 +458,6 @@ def main():
     )
     parser.add_argument("-o", "--output-dir", default="analysis_results_parallel",
                         help="Base directory to store analysis results and repository data (timestamped subfolder will be created).")
-    parser.add_argument("-p", "--pmd-path", required=True, help="Path to the PMD executable script (e.g., /path/to/pmd/bin/pmd).")
     parser.add_argument("-r", "--ruleset", required=True, help="Path to the PMD ruleset XML file.")
     parser.add_argument("-w", "--workers", type=int, default=None,
                         help="Number of worker processes (defaults to available CPUs).")
@@ -555,59 +465,36 @@ def main():
 
     args = parser.parse_args()
 
+    # 로깅 레벨 설정
+    root_logger = logging.getLogger()
+    level = logging.DEBUG if args.verbose else logging.INFO
+    root_logger.setLevel(level)
+    for h in root_logger.handlers:
+        h.setLevel(level)
+    logger.debug("Debug logging enabled." if args.verbose else "Info logging.")
 
-    if args.verbose:
-        root_logger = logging.getLogger()
-        root_logger.setLevel(logging.DEBUG)
-        for handler in root_logger.handlers:
-             handler.setLevel(logging.DEBUG)
-        logger.debug("Debug logging enabled.")
-    else:
-         root_logger = logging.getLogger()
-         root_logger.setLevel(logging.INFO)
-         for handler in root_logger.handlers:
-             handler.setLevel(logging.INFO)
-
-    import os
+    # 파라미터 검증 및 경로 설정
     aux_classpath = os.pathsep.join(args.aux_jars)
-    output_dir_base_abs = Path(args.output_dir).resolve()
-    pmd_path_abs = Path(args.pmd_path).resolve()
-    ruleset_abs = Path(args.ruleset).resolve()
+    output_dir_base = Path(args.output_dir).resolve()
+    ruleset_path = Path(args.ruleset).resolve()
 
-    if not pmd_path_abs.is_file():
-        logger.critical(f"PMD executable not found at resolved path: {pmd_path_abs}")
+    if not ruleset_path.is_file():
+        logger.critical(f"Ruleset file not found at: {ruleset_path}")
         exit(1)
-    if not os.access(pmd_path_abs, os.X_OK):
-         logger.warning(f"PMD path {pmd_path_abs} might not be executable.")
-         try:
-             current_mode = os.stat(pmd_path_abs).st_mode
-             os.chmod(pmd_path_abs, current_mode | 0o111)
-             logger.info(f"Attempted to set execute permission on {pmd_path_abs}")
-             if not os.access(pmd_path_abs, os.X_OK):
-                 logger.critical(f"Failed to set execute permission. Please ensure {pmd_path_abs} is executable.")
-                 exit(1)
-         except OSError as e:
-             logger.critical(f"Could not set execute permission on {pmd_path_abs}: {e}")
-             exit(1)
+    logger.info(f"Using ruleset: {ruleset_path}")
 
-    if not ruleset_abs.is_file():
-        logger.critical(f"Ruleset file not found at resolved path: {ruleset_abs}")
-        exit(1)
-
-    logger.info(f"Using PMD executable: {pmd_path_abs}")
-    logger.info(f"Using Ruleset: {ruleset_abs}")
-
+    # 분석 실행
     try:
         analyze_repository_parallel(
             repo_location=args.repo_location,
-            output_dir_base=output_dir_base_abs,
-            pmd_path=pmd_path_abs,
-            ruleset=ruleset_abs,
+            output_dir_base=output_dir_base,
+            pmd_path="/app/pmd-daemon.jar",
+            ruleset=ruleset_path,
             aux_classpath=aux_classpath,
             num_workers=args.workers
         )
     except Exception as e:
-        logger.critical(f"A critical error occurred in main execution: {e}", exc_info=True)
+        logger.critical(f"A critical error occurred: {e}", exc_info=True)
         exit(1)
 
 if __name__ == "__main__":
