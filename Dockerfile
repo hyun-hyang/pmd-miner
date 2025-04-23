@@ -53,4 +53,4 @@ COPY libs /opt/pmd_libs
 ENTRYPOINT ["python3", "/app/pmd_analyzer_parallel.py"]
 
 # Optional: Default command if no args given to 'docker run'
-# CMD ["--help"]
+CMD ["--help"]

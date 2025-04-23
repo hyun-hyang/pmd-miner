@@ -138,13 +138,6 @@ def analyze_commit(args):
             return commit_hash, 0, True, None
 
 
-        aux_jars = [
-            "/opt/pmd_libs/junit-4.13.2.jar",
-            "/opt/pmd_libs/commons-lang-2.6.jar"
-        ]
-        aux_classpath = ":".join(aux_jars) #윈도우면 세미콜론으로 바꾸기
-
-
 
         # Define PMD command arguments
         pmd_command = [
@@ -157,7 +150,8 @@ def analyze_commit(args):
             '--report-file', str(result_file),
             '--encoding', 'UTF-8',
             '--no-cache',
-            "--verbose",  # ← 추가!
+            '--no-fail-on-error',
+            # "--verbose",  # ← 추가!
             # '--debug'
         ]
 
