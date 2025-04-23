@@ -117,7 +117,17 @@ def analyze_commit(args):
         java_files = list(wt.rglob("*.java"))
 
         if not java_files:
-            logger.info(f"[{worker_name}] - Skipping commit {commit_short}: no Java source files.")
+            # Java 파일이 없는 커밋에도 빈 JSON 생성
+            placeholder = {
+                "commit": commit_hash,
+                "num_java_files": 0,
+                "warnings": []
+            }
+            try:
+                with open(result_file, 'w', encoding='utf-8') as f:
+                    json.dump(placeholder, f, indent=2)
+            except IOError as e:
+                logger.error(f"[{worker_name}] - Failed to write empty result for {commit_short}: {e}")
 
             with progress_lock:
                 progress_data['processed'] += 1
@@ -145,6 +155,7 @@ def analyze_commit(args):
             '--report-file', str(result_file),
             '--encoding', 'UTF-8',
             '--no-cache',
+            "--verbose",  # ← 추가!
             # '--debug'
         ]
 
