@@ -24,7 +24,7 @@ ARG PMD_HOME=/opt/pmd
 
 RUN wget --no-verbose ${PMD_URL} -O /tmp/pmd.zip \
  && unzip /tmp/pmd.zip -d /opt \
- && mv "/opt/pmd-dist-${PMD_VERSION}-bin" "${PMD_HOME}" \
+ && mv "/opt/pmd-bin-${PMD_VERSION}" "${PMD_HOME}" \
  && rm /tmp/pmd.zip \
  && chmod +x ${PMD_HOME}/bin/pmd \
  && ln -s ${PMD_HOME}/bin/pmd /usr/local/bin/pmd \
@@ -45,9 +45,12 @@ WORKDIR /app
 # Assuming your script is named analyze_repository_parallel.py
 COPY app/pmd_analyzer_parallel.py .
 
+
+COPY libs /opt/pmd_libs
+
 # 6. Define Entrypoint
 # The container will run the python script by default
 ENTRYPOINT ["python3", "/app/pmd_analyzer_parallel.py"]
 
 # Optional: Default command if no args given to 'docker run'
-# CMD ["--help"]
+CMD ["--help"]
