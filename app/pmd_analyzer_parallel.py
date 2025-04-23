@@ -77,7 +77,7 @@ def get_commit_hashes(repo_path):
 
 
 def analyze_commit(args):
-    commit_hash, base_repo_path, worktree_path, pmd_path, ruleset, output_dir, pmd_results_dir, progress_lock, progress_data, worktree_lock = args
+    commit_hash, base_repo_path, worktree_path, pmd_path, ruleset, aux_classpath, output_dir, pmd_results_dir, progress_lock, progress_data, worktree_lock = args
     worker_name = current_process().name
     start_time = time.time()
     commit_short = commit_hash[:8]
@@ -144,11 +144,13 @@ def analyze_commit(args):
         ]
         aux_classpath = ":".join(aux_jars) #윈도우면 세미콜론으로 바꾸기
 
+
+
         # Define PMD command arguments
         pmd_command = [
             str(pmd_path),
             'check',
-            '--aux-classpath', aux_classpath,
+            '--aux-classpath', aux_classpath or "",
             '--dir', str(worktree_path),
             '--rulesets', str(ruleset),
             '--format', 'json',
@@ -285,7 +287,7 @@ def generate_summary_json(output_dir, pmd_results_dir):
         json.dump(summary, f, indent=2)
     logger.info(f"Saved summary JSON to {summary_path}")
 
-def analyze_repository_parallel(repo_location, output_dir_base, pmd_path, ruleset, num_workers=None):
+def analyze_repository_parallel(repo_location, output_dir_base, pmd_path, ruleset, aux_classpath, num_workers=None):
     start_overall_time = time.time()
 
     # --- Directory Setup ---
@@ -419,6 +421,7 @@ def analyze_repository_parallel(repo_location, output_dir_base, pmd_path, rulese
             worktree_paths[i % num_workers],
             pmd_path,
             ruleset,
+            aux_classpath,
             output_dir,
             pmd_results_dir,
             progress_lock,
@@ -544,6 +547,10 @@ def cleanup_worktrees(base_repo_path, worktrees_base_path, num_worktrees_to_clea
 def main():
     parser = argparse.ArgumentParser(description="Analyze Git repository history with PMD in parallel using worktrees.")
     parser.add_argument("repo_location", help="URL or local path of the Git repository.")
+    parser.add_argument(
+        "--aux-jars", nargs="+", default=[],
+        help="PMD 분석 시 사용할 추가 JAR 파일 경로 리스트. 예: --aux-jars libs/junit.jar libs/commons-lang.jar"
+    )
     parser.add_argument("-o", "--output-dir", default="analysis_results_parallel",
                         help="Base directory to store analysis results and repository data (timestamped subfolder will be created).")
     parser.add_argument("-p", "--pmd-path", required=True, help="Path to the PMD executable script (e.g., /path/to/pmd/bin/pmd).")
@@ -553,6 +560,7 @@ def main():
     parser.add_argument("-v", "--verbose", action="store_true", help="Enable debug logging.")
 
     args = parser.parse_args()
+
 
     if args.verbose:
         root_logger = logging.getLogger()
@@ -566,7 +574,8 @@ def main():
          for handler in root_logger.handlers:
              handler.setLevel(logging.INFO)
 
-
+    import os
+    aux_classpath = os.pathsep.join(args.aux_jars)
     output_dir_base_abs = Path(args.output_dir).resolve()
     pmd_path_abs = Path(args.pmd_path).resolve()
     ruleset_abs = Path(args.ruleset).resolve()
@@ -600,6 +609,7 @@ def main():
             output_dir_base=output_dir_base_abs,
             pmd_path=pmd_path_abs,
             ruleset=ruleset_abs,
+            aux_classpath=aux_classpath,
             num_workers=args.workers
         )
     except Exception as e:
