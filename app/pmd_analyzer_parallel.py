@@ -251,6 +251,39 @@ def analyze_commit(args):
 
     return commit_hash, duration if analysis_successful else 0, analysis_successful, pmd_exit_code
 
+def generate_summary_json(output_dir, pmd_results_dir):
+    """
+    repository mining 결과를 종합하여 summary.json으로 저장
+    """
+    summary = { 'location': str(output_dir) }
+    commit_files = [f for f in pmd_results_dir.iterdir() if f.suffix == '.json' and not f.name.endswith('.error.json')]
+    number_of_commits = len(commit_files)
+
+    total_java = 0
+    total_warnings = 0
+    warnings_count = {}
+
+    for file in commit_files:
+        data = json.load(file.open(encoding='utf-8'))
+        java_count = data.get('num_java_files', 0)
+        warning_list = data.get('warnings', [])
+        warning_count = len(warning_list)
+        total_java += java_count
+        total_warnings += warning_count
+        for rule, cnt in data.get('warnings_by_rule', {}).items():
+            warnings_count[rule] = warnings_count.get(rule, 0) + cnt
+
+    summary['stat_of_repository'] = {
+        'number_of_commits': number_of_commits,
+        'avg_of_num_java_files': total_java / number_of_commits if number_of_commits else 0,
+        'avg_of_num_warnings': total_warnings / number_of_commits if number_of_commits else 0
+    }
+    summary['stat_of_warnings'] = warnings_count
+
+    summary_path = output_dir / 'summary.json'
+    with open(summary_path, 'w', encoding='utf-8') as f:
+        json.dump(summary, f, indent=2)
+    logger.info(f"Saved summary JSON to {summary_path}")
 
 def analyze_repository_parallel(repo_location, output_dir_base, pmd_path, ruleset, num_workers=None):
     start_overall_time = time.time()
@@ -443,6 +476,8 @@ def analyze_repository_parallel(repo_location, output_dir_base, pmd_path, rulese
         if pool:
             pool.close()
             pool.join()
+
+        generate_summary_json(output_dir, pmd_results_dir)
         cleanup_worktrees(base_repo_path, worktrees_base_path, num_workers)
 
 
