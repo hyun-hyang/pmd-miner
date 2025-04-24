@@ -36,7 +36,7 @@ def get_changed_java_files(prev_hash: str, curr_hash: str, repo_path: Path) -> L
     files = result.stdout.splitlines()
     # .java 확장자만 필터링
     java_files = [
-        repo_path / f for f in files
+        Path(f) for f in files
         if f.endswith('.java')
     ]
     return java_files
@@ -149,7 +149,10 @@ def analyze_commit(args):
     # Gather only changed Java files since previous commit
     prev_hash = progress_data.get('last_hash', None)
     if prev_hash:
-        java_files = get_changed_java_files(prev_hash, commit_hash, base_repo_path)
+        # 리포지터리 기준 상대경로 리스트
+        rel_paths = get_changed_java_files(prev_hash, commit_hash, base_repo_path)
+        # worktree_path 기준 실제 파일 객체로 변환
+        java_files = [worktree_path / rel for rel in rel_paths]
     else:
         # 첫 커밋일 땐 전체 파일
         java_files = list(Path(worktree_path).rglob("*.java"))
