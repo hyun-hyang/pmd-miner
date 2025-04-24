@@ -10,6 +10,7 @@ from pathlib import Path
 from multiprocessing import Pool, Manager, Lock, current_process
 from datetime import datetime
 import requests
+from typing import List
 
 
 logging.basicConfig(level=logging.INFO,
@@ -17,7 +18,31 @@ logging.basicConfig(level=logging.INFO,
                     datefmt='%Y-%m-%d %H:%M:%S')
 logger = logging.getLogger(__name__)
 
-def run_pmd_analysis_http(worktree_path, ruleset, aux_classpath, timeout=600):
+def get_changed_java_files(prev_hash: str, curr_hash: str, repo_path: Path) -> List[Path]:
+    """
+    prev_hash → curr_hash 사이에 변경된 .java 파일들의 절대 경로 리스트를 반환.
+    prev_hash가 None이면, 워크트리 전체의 .java 파일을 반환.
+    """
+    if prev_hash is None:
+        # 첫 커밋인 경우: 전체 .java 파일
+        return list(Path(repo_path).rglob("*.java"))
+
+    # 변경된 파일 목록 조회
+    result = run_command(
+        ['git', 'diff', '--name-only', prev_hash, curr_hash],
+        cwd=repo_path,
+        check=True
+    )
+    files = result.stdout.splitlines()
+    # .java 확장자만 필터링
+    java_files = [
+        repo_path / f for f in files
+        if f.endswith('.java')
+    ]
+    return java_files
+
+
+def run_pmd_analysis_http(worktree_path, ruleset, aux_classpath, timeout=600, files: List[str] = None):
     """
     PMD Daemon에 HTTP POST 요청을 보내고 JSON 리포트를 dict로 반환.
     """
@@ -25,7 +50,9 @@ def run_pmd_analysis_http(worktree_path, ruleset, aux_classpath, timeout=600):
     payload = {
         "path": str(worktree_path),
         "ruleset": str(ruleset),
-        "auxClasspath": aux_classpath or ""
+        "auxClasspath": aux_classpath or "",
+        # 변경된 파일 목록이 주어지면 해당 파일만 분석
+        **({"files": files} if files is not None else {})
     }
     resp = requests.post(url, json=payload, timeout=timeout)
     resp.raise_for_status()
@@ -118,8 +145,15 @@ def analyze_commit(args):
             json.dump({"commit": commit_hash, "error": "Git checkout failed"}, f, indent=2)
         return commit_hash, 0.0, False, -1
 
-    # Gather Java files
-    java_files = list(Path(worktree_path).rglob("*.java"))
+
+    # Gather only changed Java files since previous commit
+    prev_hash = progress_data.get('last_hash', None)
+    if prev_hash:
+        java_files = get_changed_java_files(prev_hash, commit_hash, base_repo_path)
+    else:
+        # 첫 커밋일 땐 전체 파일
+        java_files = list(Path(worktree_path).rglob("*.java"))
+
     if not java_files:
         placeholder = {"commit": commit_hash, "num_java_files": 0, "warnings": []}
         with open(result_file, 'w', encoding='utf-8') as f:
@@ -128,9 +162,16 @@ def analyze_commit(args):
             progress_data['processed'] += 1
         return commit_hash, 0.0, True, 0
 
-    # HTTP 호출로 PMD 분석
+    # HTTP 호출로 PMD 분석 (증분분석: files 필드 추가)
+
     try:
-        report = run_pmd_analysis_http(worktree_path, ruleset, aux_classpath)
+        report = run_pmd_analysis_http(
+            worktree_path,
+            ruleset,
+            aux_classpath,
+            timeout = 600,
+            files = [str(f.relative_to(worktree_path)) for f in java_files]
+        )
         with open(result_file, 'w', encoding='utf-8') as f:
             json.dump(report, f, indent=2)
         analysis_successful = True
@@ -146,6 +187,8 @@ def analyze_commit(args):
     duration = time.time() - start_time
     with progress_lock:
         progress_data['processed'] += 1
+        # 이전 해시 업데이트
+        progress_data['last_hash'] = commit_hash
         processed = progress_data['processed']
         total = progress_data['total']
         if processed % 100 == 0 or processed == total:
