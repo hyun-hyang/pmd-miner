@@ -14,14 +14,15 @@ WORKDIR /app
 # Copy PMD daemon JAR, analysis script, optional libs
 COPY pmd-daemon/target/pmd-daemon-0.1.0.jar ./pmd-daemon.jar
 COPY app/pmd_analyzer_parallel.py      ./pmd_analyzer_parallel.py
-COPY libs                             /opt/pmd_libs
+COPY libs                             /app/libs
 COPY app/quickstart.xml ./quickstart.xml
+
 
 # Entrypoint: start the daemon, wait, then run the Python script
 #ENTRYPOINT ["sh", "-c", \
 #  "java -jar pmd-daemon.jar & sleep 2 && exec python3 pmd_analyzer_parallel.py \"$@\"", "--"]
 ENTRYPOINT ["sh", "-c", \
-  "java -cp \"pmd-daemon.jar:libs/*\" net.sourceforge.pmd.PMD --listen --port 8000 & \
+  "java -cp \"pmd-daemon.jar:libs/*\" com.yourorg.pmd.PmdDaemon --listen --port 8000 & \
    sleep 2 && exec python3 pmd_analyzer_parallel.py \"$@\"", "--"]
 
 CMD ["--help"]

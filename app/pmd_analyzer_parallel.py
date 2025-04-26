@@ -68,7 +68,7 @@ def get_changed_java_files(prev_hash: str, curr_hash: str, repo_path: Path) -> L
 
     # 변경된 파일 목록 조회
     result = run_command(
-        ['git', 'diff', '--name-only', prev_hash, curr_hash],
+        ['git', 'diff', '--name-only', '--diff-filter=ACM', prev_hash, curr_hash],
         cwd=repo_path,
         check=True
     )
