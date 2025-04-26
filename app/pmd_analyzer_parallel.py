@@ -5,18 +5,57 @@ import json
 import time
 import os
 import shutil
-import traceback
 from pathlib import Path
-from multiprocessing import Pool, Manager, Lock, current_process
+from multiprocessing import Pool, Manager, current_process
 from datetime import datetime
 import requests
 from typing import List
+import hashlib
 
 
 logging.basicConfig(level=logging.INFO,
                     format='%(asctime)s - %(levelname)s - [%(processName)s] - %(message)s',
                     datefmt='%Y-%m-%d %H:%M:%S')
 logger = logging.getLogger(__name__)
+
+file_cache = Manager().dict()
+
+
+
+def compute_file_hash(path: Path) -> str:
+    """
+    주어진 파일(Path)의 SHA-1 해시를 계산하여 16진수 문자열로 반환.
+    큰 파일도 chunk 단위로 읽어 메모리 과부하를 방지합니다.
+    """
+    h = hashlib.sha1()
+    with path.open('rb') as f:
+        while True:
+            chunk = f.read(8192)
+            if not chunk:
+                break
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def load_cache(cache_path: Path) -> dict:
+    """
+    파일 해시 → 분석결과 맵을 JSON에서 로드합니다.
+    """
+    if cache_path.is_file():
+        try:
+            return json.loads(cache_path.read_text(encoding='utf-8'))
+        except Exception as e:
+            logger.warning(f"Failed to load cache from {cache_path}: {e}")
+    return {}
+
+def save_cache(cache_path: Path, cache: dict):
+    """
+    메모리상의 캐시 맵을 JSON 파일로 저장합니다.
+    """
+    try:
+        cache_path.write_text(json.dumps(cache, indent=2), encoding='utf-8')
+    except Exception as e:
+        logger.error(f"Failed to save cache to {cache_path}: {e}")
 
 def get_changed_java_files(prev_hash: str, curr_hash: str, repo_path: Path) -> List[Path]:
     """
@@ -117,8 +156,12 @@ def get_commit_hashes(repo_path):
         return []
 
 
-def analyze_commit(args):
-    commit_hash, base_repo_path, worktree_path, pmd_path, ruleset, aux_classpath, output_dir, pmd_results_dir, progress_lock, progress_data, worktree_lock = args
+def analyze_commit(commit_hash, prev_hash, base_repo_path, worktree_path, pmd_path, ruleset, aux_classpath, output_dir, pmd_results_dir, progress_lock, progress_data, worktree_lock):
+
+
+    success_flag   = False
+    pmd_code = -1
+    new_cache_dict = {}
 
     worker_name = current_process().name
     start_time = time.time()
@@ -147,12 +190,17 @@ def analyze_commit(args):
 
 
     # Gather only changed Java files since previous commit
-    prev_hash = progress_data.get('last_hash', None)
     if prev_hash:
         # 리포지터리 기준 상대경로 리스트
         rel_paths = get_changed_java_files(prev_hash, commit_hash, base_repo_path)
         # worktree_path 기준 실제 파일 객체로 변환
         java_files = [worktree_path / rel for rel in rel_paths]
+        # 존재하지 않는 파일은 스킵
+        missing = [f for f in java_files if not f.exists()]
+
+        if missing:
+            logger.warning(f"[{worker_name}] - Missing files (skipped): {missing}")
+        java_files = [f for f in java_files if f.exists()]
     else:
         # 첫 커밋일 땐 전체 파일
         java_files = list(Path(worktree_path).rglob("*.java"))
@@ -165,41 +213,121 @@ def analyze_commit(args):
             progress_data['processed'] += 1
         return commit_hash, 0.0, True, 0
 
-    # HTTP 호출로 PMD 분석 (증분분석: files 필드 추가)
+
+    # CACHE: 먼저 file_cache(Manager.dict)에서 해시 키로 결과 있는지 확인
+    # merged_report 초기화: 실제 java_files 수, warnings 리스트 반영
+
+    merged_report = {
+        "commit": commit_hash,
+        "num_java_files": len(java_files),
+        "warnings_by_rule": {},
+        "warnings": []
+    }
+    to_analyze = []
+
+    for f in java_files:
+        # 안전하게 존재 여부 체크
+        if not f.exists():
+            logger.warning(f"[{worker_name}] - Skipping missing file (pre-cache): {f}")
+            continue
+        rel = str(f.relative_to(worktree_path))
+        try:
+            h = compute_file_hash(f)  # CACHE ▶
+        except FileNotFoundError:
+            logger.warning(f"[{worker_name}] - Cannot hash (pre-cache): {f}, skipping")
+            continue
+
+        if h in file_cache:
+            entry = file_cache[h]
+            # 룰별 카운트를 덧셈으로 합산
+            for rule, cnt in entry["warnings_by_rule"].items():
+                merged_report["warnings_by_rule"][rule] = (
+                        merged_report["warnings_by_rule"].get(rule, 0) + cnt
+                )
+            merged_report["num_java_files"] += entry["num_java_files"]
+        else:
+            to_analyze.append(rel)
+            # 실제 분석이 필요한 파일만 daemon 호출
 
     try:
-        report = run_pmd_analysis_http(
-            worktree_path,
-            ruleset,
-            aux_classpath,
-            timeout = 600,
-            files = [str(f.relative_to(worktree_path)) for f in java_files]
+        raw = run_pmd_analysis_http(
+            worktree_path, ruleset, aux_classpath, timeout=600,
+            files = to_analyze
         )
-        with open(result_file, 'w', encoding='utf-8') as f:
-            json.dump(report, f, indent=2)
-        analysis_successful = True
-        pmd_code = 0
+
     except Exception as e:
+        # 기존 에러 처리 로직 유지
         logger.error(f"[{worker_name}] - HTTP PMD analysis failed for {commit_short}: {e}")
+
         with open(error_file, 'w', encoding='utf-8') as f:
             json.dump({"commit": commit_hash, "error": str(e)}, f, indent=2)
-        analysis_successful = False
-        pmd_code = -1
+        with progress_lock:
+            progress_data['processed'] += 1
 
-    # Finish timing & progress
-    duration = time.time() - start_time
-    with progress_lock:
-        progress_data['processed'] += 1
-        # 이전 해시 업데이트
-        progress_data['last_hash'] = commit_hash
-        processed = progress_data['processed']
-        total = progress_data['total']
-        if processed % 100 == 0 or processed == total:
-            logger.info(f"[MainProcess] - Progress: {processed}/{total}")
+        return commit_hash, 0.0, False, -1
 
-    return commit_hash, (duration if analysis_successful else 0.0), analysis_successful, pmd_code
+    file_reports = raw.get("fileReports", raw.get("files", []))
 
+    for fr in file_reports:
+        # PMD가 준 상대경로 얻기
+        rel = fr.get("file", fr.get("filename"))
+        file_path = worktree_path / rel
 
+        if not file_path.exists():
+            logger.warning(f"[{worker_name}] - Skipping missing file (post-PMD): {file_path}")
+            continue
+        try:
+            fh = compute_file_hash(file_path)
+        except FileNotFoundError:
+            logger.warning(f"[{worker_name}] - Cannot hash (post-PMD): {file_path}, skipping")
+            continue
+
+        if not rel:
+            # 키 이름이 또 다를 경우 로그 남기고 스킵
+            logger.warning(f"Unknown file key in PMD report: {fr.keys()}")
+            continue
+        # violations 목록에서 rule별 카운트 집계
+        vb = {}
+
+        for v in fr.get("violations", []):
+            rule = v.get("rule") or v.get("ruleSet") or "UNKNOWN"
+            vb[rule] = vb.get(rule, 0) + 1
+        # 이 해시는 파일 하나이므로 num_java_files=1
+        file_cache[fh] = {
+            "warnings_by_rule": vb,
+            "num_java_files": 1
+        }
+        # merge violations list
+        if "violations" in raw and isinstance(raw["violations"], list):
+            merged_report["warnings"] = raw["violations"]
+        else:
+            # flatten per-file violations
+            vs = []
+            for fr in file_reports:
+                vs.extend(fr.get("violations", []))
+            merged_report["warnings"] = vs
+
+        # carry through metadata and detailed files array
+        for key in ("formatVersion", "pmdVersion", "timestamp", "metrics"):
+            if key in raw:
+                merged_report[key] = raw[key]
+        merged_report["files"] = file_reports
+
+        # write result
+        with open(result_file, 'w') as f:
+            json.dump(merged_report, f, indent=2)
+        success_flag = True
+        pmd_code = 0
+
+        duration = time.time() - start_time
+        # 커밋별 소요 시간 로그
+        logger.info(f"[{worker_name}] Commit {commit_short} done in {duration:.2f}s")
+        with progress_lock:
+            progress_data['processed'] += 1
+            if progress_data['processed'] % 100 == 0 or progress_data['processed'] == progress_data['total']:
+                logger.info(f"[Main] Progress: {progress_data['processed']}/{progress_data['total']}")
+
+        return commit_hash, duration, success_flag, pmd_code, new_cache_dict
 
 
 
@@ -208,30 +336,42 @@ def generate_summary_json(output_dir, pmd_results_dir):
     """
     repository mining 결과를 종합하여 summary.json으로 저장
     """
-    summary = { 'location': str(output_dir) }
-    commit_files = [f for f in pmd_results_dir.iterdir() if f.suffix == '.json' and not f.name.endswith('.error.json')]
+    summary = {'location': str(pmd_results_dir)}
+    commit_files = list(pmd_results_dir.glob('*.json'))
+    # .error.json 제외
+    commit_files = [f for f in commit_files if not f.name.endswith('.error.json')]
     number_of_commits = len(commit_files)
 
     total_java = 0
     total_warnings = 0
     warnings_count = {}
 
+
     for file in commit_files:
         data = json.load(file.open(encoding='utf-8'))
-        java_count = data.get('num_java_files', 0)
-        warning_list = data.get('warnings', [])
-        warning_count = len(warning_list)
-        total_java += java_count
-        total_warnings += warning_count
-        for rule, cnt in data.get('warnings_by_rule', {}).items():
-            warnings_count[rule] = warnings_count.get(rule, 0) + cnt
+        # files 배열 안의 각 fileReport를 직접 순회
+        file_reports = data.get('files', [])
+        num_files = len(file_reports)
+        total_java += num_files
+
+        # 경고는 파일별 violations 배열에서 집계
+
+        for fr in file_reports:
+            vs = fr.get('violations', [])
+            total_warnings += len(vs)
+
+            for v in vs:
+                # v["rule"] 우선, 없으면 ruleSet, 그래도 없으면 UNKNOWN
+                rule = v.get('rule') or v.get('ruleSet') or 'UNKNOWN'
+                warnings_count[rule] = warnings_count.get(rule, 0) + 1
 
     summary['stat_of_repository'] = {
         'number_of_commits': number_of_commits,
-        'avg_of_num_java_files': total_java / number_of_commits if number_of_commits else 0,
-        'avg_of_num_warnings': total_warnings / number_of_commits if number_of_commits else 0
+        'avg_of_num_java_files': (total_java / number_of_commits) if number_of_commits else 0,
+        'avg_of_num_warnings': (total_warnings / number_of_commits) if number_of_commits else 0
     }
     summary['stat_of_warnings'] = warnings_count
+
 
     summary_path = output_dir / 'summary.json'
     with open(summary_path, 'w', encoding='utf-8') as f:
@@ -252,6 +392,9 @@ def analyze_repository_parallel(repo_location, output_dir_base, pmd_path, rulese
     worktrees_base_path.mkdir(parents=True, exist_ok=True)
     pmd_results_dir = output_dir / "pmd_results"
     pmd_results_dir.mkdir(parents=True, exist_ok=True)
+    cache_path = output_dir / "file_hash_cache.json"
+    file_cache.clear()
+    file_cache.update(load_cache(cache_path))
 
     # --- Repository Setup ---
     if base_repo_path.exists() and (base_repo_path / ".git").is_dir():
@@ -365,22 +508,23 @@ def analyze_repository_parallel(repo_location, output_dir_base, pmd_path, rulese
     progress_lock = manager.Lock()
     worktree_locks = [manager.Lock() for _ in range(num_workers)]
 
-    pool_args = [
-        (
-            commit_hash,
-            base_repo_path,
-            worktree_paths[i % num_workers],
-            pmd_path,
-            ruleset,
-            aux_classpath,
-            output_dir,
-            pmd_results_dir,
-            progress_lock,
-            progress_data,
-            worktree_locks[i % num_workers]
-        )
-        for i, commit_hash in enumerate(commit_hashes)
-    ]
+    pool_args = []
+    for i, commit_hash in enumerate(commit_hashes):
+        prev_hash = commit_hashes[i - 1] if i > 0 else None
+        pool_args.append((
+                             commit_hash,
+                             prev_hash,
+                             base_repo_path,
+                             worktree_paths[i % num_workers],
+                             pmd_path,
+                             ruleset,
+                             aux_classpath,
+                             output_dir,
+                             pmd_results_dir,
+                             progress_lock,
+                             progress_data,
+                             worktree_locks[i % num_workers]
+        ))
 
     logger.info(f"Starting analysis with {num_workers} worker processes...")
     results = []
@@ -390,38 +534,48 @@ def analyze_repository_parallel(repo_location, output_dir_base, pmd_path, rulese
     git_failed_commits = 0
     skipped_commits = 0
     pmd_error_codes = {}
+    interrupted = False
     pool = None
 
     try:
         pool = Pool(processes=num_workers)
-        results_iterator = pool.imap_unordered(analyze_commit, pool_args)
+        # imap_unordered: 결과가 준비되는 즉시 리턴해 줌
+        results = pool.starmap(analyze_commit, pool_args)
 
-        for i, result_tuple in enumerate(results_iterator):
-            commit_hash, duration, success_flag, pmd_code = result_tuple
+        for i, (commit_hash, duration, success_flag, pmd_code, new_cache) in enumerate(results, start=1):
 
-            if success_flag is True and duration == 0:
-                 skipped_commits += 1
+            # A) 캐시 업데이트
+            file_cache.update(new_cache)
+
+            # B) 기존 로직대로 성공/실패 집계
+            if success_flag and duration == 0:
+                skipped_commits += 1
             elif success_flag:
                 successful_commits += 1
                 total_duration += duration
             else:
-                 if pmd_code == -1: # Assume Git error if PMD didn't even run
-                     git_failed_commits += 1
-                 else:
-                     pmd_failed_commits += 1
-                     pmd_error_codes[pmd_code] = pmd_error_codes.get(pmd_code, 0) + 1
+                if pmd_code == -1:
+                    git_failed_commits += 1
+                else:
+                    pmd_failed_commits += 1
+                    pmd_error_codes[pmd_code] = pmd_error_codes.get(pmd_code, 0) + 1
+            processed = skipped_commits + successful_commits + pmd_failed_commits + git_failed_commits
+            # 200 커밋마다 중간 저장 및 로그
+            if processed % 200 == 0 or processed == total_commits:
+                logger.info(f"[MainProcess] - Intermediate Progress: {processed}/{total_commits} tasks processed.")
+                logger.info(f"[Main] Saving file-hash cache at {processed} commits")
+                save_cache(cache_path, dict(file_cache))
 
-
-            processed_count = skipped_commits + successful_commits + pmd_failed_commits + git_failed_commits
-            if processed_count % 200 == 0 or processed_count == total_commits:
-                 logger.info(f"[MainProcess] - Intermediate Progress: {processed_count}/{total_commits} tasks processed.")
+        pool.close()
+        pool.join()
 
 
     except KeyboardInterrupt:
+        interrupted = True
         logger.warning("Keyboard interrupt received. Terminating workers...")
         if pool:
             pool.terminate()
-        logger.warning("Workers terminated.")
+        logger.warning("Workers terminated due to interrupt.")
     except Exception as e:
          logger.error(f"An error occurred during the main analysis pool processing: {e}", exc_info=True)
          if pool:
@@ -431,7 +585,20 @@ def analyze_repository_parallel(repo_location, output_dir_base, pmd_path, rulese
             pool.close()
             pool.join()
 
-        generate_summary_json(output_dir, pmd_results_dir)
+        save_cache(cache_path, dict(file_cache))
+
+        if interrupted:
+            # 중단 시점의 진행률만 찍기
+            processed = progress_data.get('processed', 0)
+            total = progress_data.get('total', 0)
+            elapsed = time.time() - start_overall_time
+            avg_sec = elapsed / processed if processed else 0
+            logger.info(f"중단 시점 처리 완료: {processed}/{total} 커밋 (평균 {avg_sec:.2f}s/커밋)")
+            return
+        else:
+            # 정상 종료 시에만 summary 생성
+            generate_summary_json(output_dir, pmd_results_dir)
+
         cleanup_worktrees(base_repo_path, worktrees_base_path, num_workers)
 
 
