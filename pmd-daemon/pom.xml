@@ -12,7 +12,7 @@
   <properties>
     <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
     <java.version>17</java.version>
-    <pmd.version>7.12.0</pmd.version>
+    <pmd.version>7.13.0</pmd.version>
     <jackson.version>2.15.2</jackson.version>
   </properties>
 
@@ -35,6 +35,14 @@
       <artifactId>jackson-databind</artifactId>
       <version>${jackson.version}</version>
     </dependency>
+
+    <!-- SLF4J API 바인딩: 콘솔에 출력해주는 simple -->
+    <dependency>
+      <groupId>org.slf4j</groupId>
+      <artifactId>slf4j-simple</artifactId>
+      <version>1.7.36</version>
+    </dependency>
+
   </dependencies>
 
   <build>

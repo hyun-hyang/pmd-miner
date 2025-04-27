@@ -675,8 +675,19 @@ def main():
     parser.add_argument("-w", "--workers", type=int, default=None,
                         help="Number of worker processes (defaults to available CPUs).")
     parser.add_argument("-v", "--verbose", action="store_true", help="Enable debug logging.")
+    parser.add_argument(
+        "-q", "--quiet",
+        action="store_true",
+        help="suppress PMD warnings and INFO logs"
+    )
 
     args = parser.parse_args()
+    import logging
+    if args.quiet:
+        # Silence the PMD‐daemon HTTP dispatcher and urllib3 warnings
+        logging.getLogger("HTTP-Dispatcher").setLevel(logging.ERROR)
+        logging.getLogger("urllib3").setLevel(logging.ERROR)
+        logging.getLogger().setLevel(logging.ERROR)
 
     # 로깅 레벨 설정
     root_logger = logging.getLogger()
