@@ -250,10 +250,13 @@ def analyze_commit(commit_hash, prev_hash, base_repo_path, worktree_path, pmd_pa
             # 실제 분석이 필요한 파일만 daemon 호출
 
     try:
-        raw = run_pmd_analysis_http(
-            worktree_path, ruleset, aux_classpath, timeout=600,
-            files = to_analyze
-        )
+        if not to_analyze:
+            logger.info(f"[{worker_name}] No files to analyze for commit {commit_short}. Skipping PMD call.")
+        else:
+            raw = run_pmd_analysis_http(
+                worktree_path, ruleset, aux_classpath, timeout=600,
+                files=to_analyze
+            )
 
     except Exception as e:
         # 기존 에러 처리 로직 유지
