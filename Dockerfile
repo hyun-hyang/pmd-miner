@@ -17,18 +17,13 @@ COPY app/pmd_analyzer_parallel.py      ./pmd_analyzer_parallel.py
 COPY libs                             /opt/libs
 COPY app/quickstart.xml ./quickstart.xml
 
+RUN mkdir /app/analysis_results_parallel
 
-# Entrypoint: start the daemon, wait, then run the Python script
-#ENTRYPOINT ["sh", "-c", \
-#  "java -jar pmd-daemon.jar & sleep 2 && exec python3 pmd_analyzer_parallel.py \"$@\"", "--"]
-#ENTRYPOINT ["sh", "-c", \
-#  "java -cp \"pmd-daemon.jar:libs/*\" com.yourorg.pmd.PmdDaemon --listen --port 8000 & \
-#   sleep 2 && exec python3 pmd_analyzer_parallel.py \"$@\"", "--"]
 ENTRYPOINT ["sh", "-c", \
-  "java -cp \"pmd-daemon.jar:opt/libs/*\" \
+  "java -cp \"pmd-daemon.jar:/opt/libs/*\" \
      com.yourorg.pmd.PmdDaemon \
      --listen --port 8000 \
      --cache /app/pmd-cache.dat --ignore-errors & \
-   sleep 2 && exec python3 pmd_analyzer_parallel.py \"$@\"", "--"]
+   sleep 3 && exec python3 pmd_analyzer_parallel.py \"$@\"", "--"]
 
 CMD ["--help"]
