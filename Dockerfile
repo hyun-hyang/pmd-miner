@@ -12,7 +12,7 @@ WORKDIR /app
 COPY pmd-daemon/target/pmd-daemon-0.1.0.jar ./pmd-daemon.jar
 COPY app/pmd_analyzer_parallel.py      ./pmd_analyzer_parallel.py
 COPY libs                             /opt/libs
-COPY app/quickstart.xml ./quickstart.xml
+COPY rules/quickstart.xml               rules/quickstart.xml
 
 ENTRYPOINT ["sh", "-c", \
   "java -cp \"pmd-daemon.jar:opt/libs/*\" \
