@@ -4,7 +4,8 @@ LABEL authors="hyun-hyang"
 
 WORKDIR /build
 
-RUN git clone https://github.com/hyun-hyang/pmd-miner.git .
+COPY . .
+#RUN git clone https://github.com/hyun-hyang/pmd-miner.git .
 WORKDIR /build/pmd-daemon
 RUN mvn clean package dependency:copy-dependencies -DskipTests
 
@@ -13,19 +14,20 @@ FROM amazoncorretto:17-alpine-jdk
 LABEL authors="hyun-hyang"
 
 RUN apk update && \
-    apk add --no-cache python3 py3-pip bash py3-requests
-
-# Runtime Stage 상단에 추가
-COPY --from=builder /build/requirements.txt ./
-RUN pip3 install --no-cache-dir -r requirements.txt
+    apk add --no-cache \
+      python3 \
+      py3-pip \
+      bash \
+      py3-requests \
+      py3-lxml \
+      py3-gitpython
 
 WORKDIR /app
 
-COPY --from=builder /build/pmd-daemon/target/pmd-daemon-0.1.0.jar ./pmd-daemon.jar
-COPY --from=builder /build/pmd-daemon/target/dependency /opt/libs
-
-COPY --from=builder /build/app/pmd_analyzer_parallel.py ./pmd_analyzer_parallel.py
-COPY --from=builder /build/rules/quickstart.xml ./rules/quickstart.xml
+COPY --from=builder /build/pmd-daemon/target/pmd-daemon-0.1.0.jar   ./pmd-daemon.jar
+COPY --from=builder /build/pmd-daemon/target/dependency             /opt/libs
+COPY --from=builder /build/app/pmd_analyzer_parallel.py             ./pmd_analyzer_parallel.py
+COPY --from=builder /build/rules/quickstart.xml                     ./rules/quickstart.xml
 
 EXPOSE 8000
 

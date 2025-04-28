@@ -31,3 +31,4 @@ docker-compose.override.yml
 
 commons-lang-analysis/
 analysis_output/
+analysis_results/
