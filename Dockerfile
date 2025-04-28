@@ -9,10 +9,11 @@ WORKDIR /app
 
 
 # Copy PMD daemon JAR, analysis script, optional libs
-COPY pmd-daemon/target/pmd-daemon-0.1.0.jar ./pmd-daemon.jar
-COPY app/pmd_analyzer_parallel.py      ./pmd_analyzer_parallel.py
-COPY libs                             /opt/libs
-COPY rules/quickstart.xml               rules/quickstart.xml
+COPY pmd-daemon/target/pmd-daemon-0.1.0.jar     ./pmd-daemon.jar
+COPY app/pmd_analyzer_parallel.py               ./pmd_analyzer_parallel.py
+COPY pmd-daemon/target/dependency               /opt/libs
+COPY rules/quickstart.xml                       rules/quickstart.xml
+COPY target/dependency /opt/libs
 
 ENTRYPOINT ["sh", "-c", \
   "java -cp \"pmd-daemon.jar:opt/libs/*\" \
@@ -20,5 +21,10 @@ ENTRYPOINT ["sh", "-c", \
      --listen --port 8000 \
      --cache /app/pmd-cache.dat --ignore-errors & \
    sleep 2 && exec python3 pmd_analyzer_parallel.py \"$@\"", "--"]
+
+#ENTRYPOINT ["java",
+#            "-cp", "pmd-daemon.jar:/opt/libs/*",
+#            "com.yourorg.pmd.PmdDaemon"]
+
 
 CMD ["--help"]
