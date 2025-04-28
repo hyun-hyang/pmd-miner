@@ -9,7 +9,7 @@ WORKDIR /build/pmd-daemon
 RUN mvn clean package dependency:copy-dependencies -DskipTests
 
 # -------- Runtime Stage --------
-FROM amazoncorretto:17-alpine
+FROM amazoncorretto:17-alpine-jdk
 LABEL authors="hyun-hyang"
 
 RUN apk update && \
