@@ -1,30 +1,38 @@
-FROM amazoncorretto:17-alpine-jdk
-LABEL authors="RTSE16"
+# -------- Build Stage --------
+FROM maven:3.8.5-openjdk-17 AS builder
+LABEL authors="hyun-hyang"
 
-# System deps: Git, Python3, pip and the requests library
+WORKDIR /build
+
+RUN git clone https://github.com/hyun-hyang/pmd-miner.git .
+WORKDIR /build/pmd-daemon
+RUN mvn clean package dependency:copy-dependencies -DskipTests
+
+# -------- Runtime Stage --------
+FROM amazoncorretto:17-alpine
+LABEL authors="hyun-hyang"
+
 RUN apk update && \
-    apk add --no-cache git python3 py3-pip bash py3-requests
+    apk add --no-cache python3 py3-pip bash py3-requests
+
+# Runtime Stage 상단에 추가
+COPY --from=builder /build/requirements.txt ./
+RUN pip3 install --no-cache-dir -r requirements.txt
 
 WORKDIR /app
 
+COPY --from=builder /build/pmd-daemon/target/pmd-daemon-0.1.0.jar ./pmd-daemon.jar
+COPY --from=builder /build/pmd-daemon/target/dependency /opt/libs
 
-# Copy PMD daemon JAR, analysis script, optional libs
-COPY pmd-daemon/target/pmd-daemon-0.1.0.jar     ./pmd-daemon.jar
-COPY app/pmd_analyzer_parallel.py               ./pmd_analyzer_parallel.py
-COPY pmd-daemon/target/dependency               /opt/libs
-COPY rules/quickstart.xml                       rules/quickstart.xml
-COPY target/dependency /opt/libs
+COPY --from=builder /build/app/pmd_analyzer_parallel.py ./pmd_analyzer_parallel.py
+COPY --from=builder /build/rules/quickstart.xml ./rules/quickstart.xml
 
-ENTRYPOINT ["sh", "-c", \
-  "java -cp \"pmd-daemon.jar:opt/libs/*\" \
-     com.yourorg.pmd.PmdDaemon \
-     --listen --port 8000 \
-     --cache /app/pmd-cache.dat --ignore-errors & \
-   sleep 2 && exec python3 pmd_analyzer_parallel.py \"$@\"", "--"]
+EXPOSE 8000
 
-#ENTRYPOINT ["java",
-#            "-cp", "pmd-daemon.jar:/opt/libs/*",
-#            "com.yourorg.pmd.PmdDaemon"]
-
+ENTRYPOINT ["sh","-c", "\
+  java -cp \"pmd-daemon.jar:/opt/libs/*\" com.yourorg.pmd.PmdDaemon \
+    --listen --port 8000 --cache /app/pmd-cache.dat --ignore-errors & \
+  sleep 2 && exec python3 pmd_analyzer_parallel.py \"$@\" \
+","--"]
 
 CMD ["--help"]
