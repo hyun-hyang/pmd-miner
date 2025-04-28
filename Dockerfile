@@ -4,8 +4,8 @@ LABEL authors="hyun-hyang"
 
 WORKDIR /build
 
-COPY . .
-#RUN git clone https://github.com/hyun-hyang/pmd-miner.git .
+#COPY . . //dev용
+RUN git clone https://github.com/hyun-hyang/pmd-miner.git .
 WORKDIR /build/pmd-daemon
 RUN mvn clean package dependency:copy-dependencies -DskipTests
 
