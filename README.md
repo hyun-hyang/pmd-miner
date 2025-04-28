@@ -50,14 +50,14 @@ docker run --rm \
   -v "$(pwd)/analysis_output:/app/analysis_results_parallel" \
   pmd-analyzer \
   https://github.com/apache/commons-lang \
-  -r /app/quickstart.xml \
+  -r /rules/quickstart.xml \
   --aux-jars /opt/libs/junit-4.13.2.jar /opt/libs/commons-lang-2.6.jar \
   -w 8
 
 ```
 윈도우용)
 ```bash
-docker run --rm -v "${PWD}/analysis_output:/app/analysis_results_parallel" pmd-analyzer-daemon https://github.com/apache/commons-lang --aux-jars /opt/libs/junit-4.13.2.jar:/opt/libs/commons-lang-2.6.jar -o /app/analysis_results_parallel -r /app/quickstart.xml
+docker run --rm -v "${PWD}/analysis_output:/app/analysis_results_parallel" pmd-analyzer-daemon https://github.com/apache/commons-lang --aux-jars /opt/libs/junit-4.13.2.jar:/opt/libs/commons-lang-2.6.jar -o /app/analysis_results_parallel -r /rules/quickstart.xml
 ```
 
 > 컨테이너 안에서 PMD Daemon 서버가 자동으로 올라간 후, Python 분석 스크립트가 실행됩니다.
