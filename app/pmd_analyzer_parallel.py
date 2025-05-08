@@ -12,14 +12,12 @@ import requests
 from typing import List
 import hashlib
 
-
 logging.basicConfig(level=logging.INFO,
                     format='%(asctime)s - %(levelname)s - [%(processName)s] - %(message)s',
                     datefmt='%Y-%m-%d %H:%M:%S')
 logger = logging.getLogger(__name__)
 
 file_cache = Manager().dict()
-
 
 
 def compute_file_hash(path: Path) -> str:
@@ -48,6 +46,7 @@ def load_cache(cache_path: Path) -> dict:
             logger.warning(f"Failed to load cache from {cache_path}: {e}")
     return {}
 
+
 def save_cache(cache_path: Path, cache: dict):
     """
     메모리상의 캐시 맵을 JSON 파일로 저장합니다.
@@ -56,6 +55,7 @@ def save_cache(cache_path: Path, cache: dict):
         cache_path.write_text(json.dumps(cache, indent=2), encoding='utf-8')
     except Exception as e:
         logger.error(f"Failed to save cache to {cache_path}: {e}")
+
 
 def get_changed_java_files(prev_hash: str, curr_hash: str, repo_path: Path) -> List[Path]:
     """
@@ -97,6 +97,7 @@ def run_pmd_analysis_http(worktree_path, ruleset, aux_classpath, timeout=600, fi
     resp.raise_for_status()
     return resp.json()
 
+
 def run_command(command, cwd=None, check=True, suppress_stderr=False):
     cmd_str = ' '.join(map(str, command))
     command = [str(part) for part in command]
@@ -105,21 +106,20 @@ def run_command(command, cwd=None, check=True, suppress_stderr=False):
     try:
         result = subprocess.run(command, capture_output=True, text=True, check=False, cwd=cwd, errors='ignore')
 
-
         log_level_stdout = logging.DEBUG
         log_level_stderr = logging.WARNING
         if result.returncode != 0:
-             log_level_stdout = logging.WARNING if not check else logging.ERROR
-             log_level_stderr = logging.ERROR
+            log_level_stdout = logging.WARNING if not check else logging.ERROR
+            log_level_stderr = logging.ERROR
 
         if result.stdout and (logger.getEffectiveLevel() <= logging.DEBUG or log_level_stdout >= logging.WARNING):
-             logger.log(log_level_stdout, f"Command stdout: {cmd_str}\n{result.stdout.strip()}")
+            logger.log(log_level_stdout, f"Command stdout: {cmd_str}\n{result.stdout.strip()}")
 
         if result.stderr and not suppress_stderr:
-             logger.log(log_level_stderr, f"Command stderr: {cmd_str}\n{result.stderr.strip()}")
+            logger.log(log_level_stderr, f"Command stderr: {cmd_str}\n{result.stderr.strip()}")
 
         if check and result.returncode != 0:
-             raise subprocess.CalledProcessError(result.returncode, command, output=result.stdout, stderr=result.stderr)
+            raise subprocess.CalledProcessError(result.returncode, command, output=result.stdout, stderr=result.stderr)
 
         return result
 
@@ -127,17 +127,18 @@ def run_command(command, cwd=None, check=True, suppress_stderr=False):
         logger.error(f"Command failed: {' '.join(map(str, e.cmd))}")
         logger.error(f"Return code: {e.returncode}")
         if e.stdout:
-             logger.error(f"Failed Command Output: {e.stdout.strip()}")
+            logger.error(f"Failed Command Output: {e.stdout.strip()}")
         if e.stderr:
-             logger.error(f"Failed Command Error Output: {e.stderr.strip()}")
+            logger.error(f"Failed Command Error Output: {e.stderr.strip()}")
         if check:
-             raise
+            raise
         return e
     except FileNotFoundError:
         logger.error(f"Command not found: {command[0]}")
         raise
     except Exception as e:
-        logger.error(f"An unexpected error occurred running command '{cmd_str}': {e}", exc_info=True) # Add exc_info for full traceback
+        logger.error(f"An unexpected error occurred running command '{cmd_str}': {e}",
+                     exc_info=True)  # Add exc_info for full traceback
         raise
 
 
@@ -156,10 +157,9 @@ def get_commit_hashes(repo_path):
         return []
 
 
-def analyze_commit(commit_hash, prev_hash, base_repo_path, worktree_path, pmd_path, ruleset, aux_classpath, output_dir, pmd_results_dir, progress_lock, progress_data, worktree_lock):
-
-
-    success_flag   = False
+def analyze_commit(commit_hash, prev_hash, base_repo_path, worktree_path, pmd_path, ruleset, aux_classpath, output_dir,
+                   pmd_results_dir, progress_lock, progress_data, worktree_lock, extra_pmd_flags):
+    success_flag = False
     pmd_code = -1
     new_cache_dict = {}
 
@@ -188,7 +188,6 @@ def analyze_commit(commit_hash, prev_hash, base_repo_path, worktree_path, pmd_pa
             json.dump({"commit": commit_hash, "error": "Git checkout failed"}, f, indent=2)
         return commit_hash, 0.0, False, -1
 
-
     # Gather only changed Java files since previous commit
     if prev_hash:
         # 리포지터리 기준 상대경로 리스트
@@ -212,7 +211,6 @@ def analyze_commit(commit_hash, prev_hash, base_repo_path, worktree_path, pmd_pa
         with progress_lock:
             progress_data['processed'] += 1
         return commit_hash, 0.0, True, 0
-
 
     # CACHE: 먼저 file_cache(Manager.dict)에서 해시 키로 결과 있는지 확인
     # merged_report 초기화: 실제 java_files 수, warnings 리스트 반영
@@ -333,8 +331,6 @@ def analyze_commit(commit_hash, prev_hash, base_repo_path, worktree_path, pmd_pa
         return commit_hash, duration, success_flag, pmd_code, new_cache_dict
 
 
-
-
 def generate_summary_json(output_dir, pmd_results_dir):
     """
     repository mining 결과를 종합하여 summary.json으로 저장
@@ -348,7 +344,6 @@ def generate_summary_json(output_dir, pmd_results_dir):
     total_java = 0
     total_warnings = 0
     warnings_count = {}
-
 
     for file in commit_files:
         data = json.load(file.open(encoding='utf-8'))
@@ -375,14 +370,17 @@ def generate_summary_json(output_dir, pmd_results_dir):
     }
     summary['stat_of_warnings'] = warnings_count
 
-
     summary_path = output_dir / 'summary.json'
     with open(summary_path, 'w', encoding='utf-8') as f:
         json.dump(summary, f, indent=2)
     logger.info(f"Saved summary JSON to {summary_path}")
 
-def analyze_repository_parallel(repo_location, output_dir_base, pmd_path, ruleset, aux_classpath, num_workers=None):
+
+def analyze_repository_parallel(repo_location, output_dir_base, pmd_path, ruleset, aux_classpath, num_workers, extra_pmd_flags = None):
     start_overall_time = time.time()
+
+    if extra_pmd_flags is None:
+        extra_pmd_flags = []
 
     # --- Directory Setup ---
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -403,27 +401,27 @@ def analyze_repository_parallel(repo_location, output_dir_base, pmd_path, rulese
     if base_repo_path.exists() and (base_repo_path / ".git").is_dir():
         logger.info(f"Base repository exists at {base_repo_path}. Fetching updates...")
         try:
-            run_command(['git', 'fetch', 'origin', '--prune'], cwd=base_repo_path, check=True) # Add prune
+            run_command(['git', 'fetch', 'origin', '--prune'], cwd=base_repo_path, check=True)  # Add prune
             logger.info("Fetch complete.")
         except subprocess.CalledProcessError as e:
             logger.error(f"Failed to fetch updates: {e.stderr}. Proceeding with existing local repo.")
         except Exception as e:
-             logger.error(f"Error fetching updates: {e}. Proceeding with existing local repo.")
+            logger.error(f"Error fetching updates: {e}. Proceeding with existing local repo.")
     else:
         if base_repo_path.exists():
-             logger.warning(f"Path {base_repo_path} exists but is not a valid git repo. Removing.")
-             try:
-                 shutil.rmtree(base_repo_path)
-             except OSError as e:
-                 logger.critical(f"Failed to remove existing invalid repo directory {base_repo_path}: {e}. Exiting.")
-                 exit(1)
+            logger.warning(f"Path {base_repo_path} exists but is not a valid git repo. Removing.")
+            try:
+                shutil.rmtree(base_repo_path)
+            except OSError as e:
+                logger.critical(f"Failed to remove existing invalid repo directory {base_repo_path}: {e}. Exiting.")
+                exit(1)
         logger.info(f"Cloning repository from {repo_location} to {base_repo_path}...")
         try:
             run_command(['git', 'clone', repo_location, str(base_repo_path)], check=True)
             logger.info("Base repository cloned successfully.")
         except Exception as e:
-             logger.critical(f"Failed to clone repository: {e}. Exiting.")
-             exit(1)
+            logger.critical(f"Failed to clone repository: {e}. Exiting.")
+            exit(1)
 
     # --- Get Commits ---
     commit_hashes = get_commit_hashes(base_repo_path)
@@ -450,10 +448,9 @@ def analyze_repository_parallel(repo_location, output_dir_base, pmd_path, rulese
     except Exception as e:
         logger.warning(f"git worktree prune failed (this might be ok if no stale trees exist): {e}")
 
-
-    existing_wt_dirs = set(item for item in worktrees_base_path.iterdir() if item.is_dir() and item.name.startswith("wt_"))
+    existing_wt_dirs = set(
+        item for item in worktrees_base_path.iterdir() if item.is_dir() and item.name.startswith("wt_"))
     logger.debug(f"Found existing worktree dirs: {existing_wt_dirs}")
-
 
     registered_worktrees = set()
     try:
@@ -469,24 +466,23 @@ def analyze_repository_parallel(repo_location, output_dir_base, pmd_path, rulese
     except Exception as e:
         logger.warning(f"Could not list registered worktrees: {e}")
 
-
     for wt_path in registered_worktrees:
         if wt_path.name.startswith("wt_"):
             logger.warning(f"Attempting to remove registered worktree: {wt_path.name}")
             try:
 
-                run_command(['git', 'worktree', 'remove', '--force', wt_path.name], cwd=str(base_repo_path), check=False, suppress_stderr=True)
+                run_command(['git', 'worktree', 'remove', '--force', wt_path.name], cwd=str(base_repo_path),
+                            check=False, suppress_stderr=True)
             except Exception as e:
                 logger.error(f"Error removing registered worktree {wt_path.name} using git: {e}")
 
-
     for wt_path in existing_wt_dirs:
-         if wt_path.exists():
-             logger.warning(f"Force removing potentially stale worktree directory: {wt_path}")
-             try:
-                 shutil.rmtree(wt_path)
-             except OSError as e:
-                 logger.error(f"Failed to remove directory {wt_path}: {e}. Analysis might fail.")
+        if wt_path.exists():
+            logger.warning(f"Force removing potentially stale worktree directory: {wt_path}")
+            try:
+                shutil.rmtree(wt_path)
+            except OSError as e:
+                logger.error(f"Failed to remove directory {wt_path}: {e}. Analysis might fail.")
 
     logger.info("Stale worktree cleanup finished.")
 
@@ -498,13 +494,13 @@ def analyze_repository_parallel(repo_location, output_dir_base, pmd_path, rulese
         worktree_paths.append(wt_path)
         logger.info(f"Creating worktree {i} at {wt_path} linked to {initial_commit_hash[:8]}")
         try:
-            run_command(['git', '-C', str(base_repo_path), 'worktree', 'add', '--detach', str(wt_path), initial_commit_hash], check=True)
+            run_command(
+                ['git', '-C', str(base_repo_path), 'worktree', 'add', '--detach', str(wt_path), initial_commit_hash],
+                check=True)
         except Exception as e:
-             logger.critical(f"Failed to create worktree {i} at {wt_path}. Error: {e}. Exiting.")
-             cleanup_worktrees(base_repo_path, worktrees_base_path, i + 1)
-             exit(1)
-
-
+            logger.critical(f"Failed to create worktree {i} at {wt_path}. Error: {e}. Exiting.")
+            cleanup_worktrees(base_repo_path, worktrees_base_path, i + 1)
+            exit(1)
 
     manager = Manager()
     progress_data = manager.dict({'processed': 0, 'total': total_commits})
@@ -515,18 +511,19 @@ def analyze_repository_parallel(repo_location, output_dir_base, pmd_path, rulese
     for i, commit_hash in enumerate(commit_hashes):
         prev_hash = commit_hashes[i - 1] if i > 0 else None
         pool_args.append((
-                             commit_hash,
-                             prev_hash,
-                             base_repo_path,
-                             worktree_paths[i % num_workers],
-                             pmd_path,
-                             ruleset,
-                             aux_classpath,
-                             output_dir,
-                             pmd_results_dir,
-                             progress_lock,
-                             progress_data,
-                             worktree_locks[i % num_workers]
+            commit_hash,
+            prev_hash,
+            base_repo_path,
+            worktree_paths[i % num_workers],
+            pmd_path,
+            ruleset,
+            aux_classpath,
+            output_dir,
+            pmd_results_dir,
+            progress_lock,
+            progress_data,
+            worktree_locks[i % num_workers],
+            extra_pmd_flags
         ))
 
     logger.info(f"Starting analysis with {num_workers} worker processes...")
@@ -580,9 +577,9 @@ def analyze_repository_parallel(repo_location, output_dir_base, pmd_path, rulese
             pool.terminate()
         logger.warning("Workers terminated due to interrupt.")
     except Exception as e:
-         logger.error(f"An error occurred during the main analysis pool processing: {e}", exc_info=True)
-         if pool:
-             pool.terminate()
+        logger.error(f"An error occurred during the main analysis pool processing: {e}", exc_info=True)
+        if pool:
+            pool.terminate()
     finally:
         if pool:
             pool.close()
@@ -604,13 +601,11 @@ def analyze_repository_parallel(repo_location, output_dir_base, pmd_path, rulese
 
         cleanup_worktrees(base_repo_path, worktrees_base_path, num_workers)
 
-
     end_overall_time = time.time()
     overall_duration = end_overall_time - start_overall_time
     attempted_commits = successful_commits + pmd_failed_commits + git_failed_commits
     avg_time_successful = total_duration / successful_commits if successful_commits > 0 else 0
     avg_time_attempted = overall_duration / attempted_commits if attempted_commits > 0 else 0
-
 
     logger.info("-" * 50)
     logger.info("Analysis Summary:")
@@ -626,7 +621,7 @@ def analyze_repository_parallel(repo_location, output_dir_base, pmd_path, rulese
     logger.info(f"  Avg. time / successful commit: {avg_time_successful:.2f} seconds")
     logger.info(f"  Overall avg. time / commit: {avg_time_attempted:.2f} seconds")
 
-    perf_limit = 1.0 # Example target
+    perf_limit = 1.0  # Example target
     if avg_time_attempted <= perf_limit:
         logger.info(f"  Performance requirement (<= {perf_limit:.1f}s/commit overall) met.")
     else:
@@ -637,7 +632,8 @@ def analyze_repository_parallel(repo_location, output_dir_base, pmd_path, rulese
 def cleanup_worktrees(base_repo_path, worktrees_base_path, num_worktrees_to_clean):
     logger.info("Cleaning up worktrees...")
     if not base_repo_path.exists() or not (base_repo_path / ".git").is_dir():
-        logger.warning(f"Base repository path '{base_repo_path}' does not exist or is not a git repo. Skipping git cleanup.")
+        logger.warning(
+            f"Base repository path '{base_repo_path}' does not exist or is not a git repo. Skipping git cleanup.")
     else:
         try:
             run_command(['git', '-C', str(base_repo_path), 'worktree', 'prune'], check=False, suppress_stderr=True)
@@ -648,9 +644,10 @@ def cleanup_worktrees(base_repo_path, worktrees_base_path, num_worktrees_to_clea
             wt_name = f"wt_{i}"
             logger.debug(f"Attempting git worktree remove for {wt_name}")
             try:
-                run_command(['git', '-C', str(base_repo_path), 'worktree', 'remove', '--force', wt_name], check=False, suppress_stderr=True)
+                run_command(['git', '-C', str(base_repo_path), 'worktree', 'remove', '--force', wt_name], check=False,
+                            suppress_stderr=True)
             except Exception as e:
-                 logger.warning(f"Final git worktree remove command failed for {wt_name}: {e}")
+                logger.warning(f"Final git worktree remove command failed for {wt_name}: {e}")
 
     if worktrees_base_path.exists():
         for i in range(num_worktrees_to_clean):
@@ -663,6 +660,14 @@ def cleanup_worktrees(base_repo_path, worktrees_base_path, num_worktrees_to_clea
                     logger.error(f"Failed to remove worktree directory {wt_path} during final cleanup: {e}")
     logger.info("Worktree cleanup finished.")
 
+
+def build_pmd_flags(args):
+    flags = ["--verbose" if args.pmd_debug else "--no-cache"]
+    if args.pmd_debug:
+        flags += ["--debug"]
+    if args.strict_errors:
+        flags += ["--fail-on-processing-error"]
+    return flags
 
 
 def main():
@@ -677,6 +682,8 @@ def main():
     parser.add_argument("-r", "--ruleset", required=True, help="Path to the PMD ruleset XML file.")
     parser.add_argument("-w", "--workers", type=int, default=None,
                         help="Number of worker processes (defaults to available CPUs).")
+    parser.add_argument("--pmd-debug", action="store_true", help="Pass --debug to PMD")
+    parser.add_argument("--strict-errors", action="store_true", help="PMD --fail-on-processing-error")
     parser.add_argument("-v", "--verbose", action="store_true", help="Enable debug logging.")
     parser.add_argument(
         "-q", "--quiet",
@@ -686,43 +693,46 @@ def main():
 
     args = parser.parse_args()
     import logging
+
+    level = logging.DEBUG if args.verbose else logging.INFO
+    logging.basicConfig(
+        level=level,
+        format="%(asctime)s [%(levelname)s] %(name)s - %(message)s",
+        datefmt="%H:%M:%S",
+    )
     if args.quiet:
-        # Silence the PMD‐daemon HTTP dispatcher and urllib3 warnings
+        # PMD 쪽 noisy 로그만 죽임
         logging.getLogger("HTTP-Dispatcher").setLevel(logging.ERROR)
         logging.getLogger("urllib3").setLevel(logging.ERROR)
         logging.getLogger().setLevel(logging.ERROR)
 
-    # 로깅 레벨 설정
-    root_logger = logging.getLogger()
-    level = logging.DEBUG if args.verbose else logging.INFO
-    root_logger.setLevel(level)
-    for h in root_logger.handlers:
-        h.setLevel(level)
-    logger.debug("Debug logging enabled." if args.verbose else "Info logging.")
-
-    # 파라미터 검증 및 경로 설정
-    aux_classpath = os.pathsep.join(args.aux_jars)
-    output_dir_base = Path(args.output_dir).resolve()
-    ruleset_path = Path(args.ruleset).resolve()
-
+    ruleset_path = Path(args.ruleset).expanduser().resolve()
     if not ruleset_path.is_file():
-        logger.critical(f"Ruleset file not found at: {ruleset_path}")
+        logger.critical("Ruleset not found: %s", ruleset_path)
         exit(1)
+
+    aux_classpath = os.pathsep.join([
+        str(Path(p).expanduser().resolve()) for p in args.aux_jars if Path(p).is_file()
+    ])
+
+    output_dir_base = Path(args.output_dir).resolve()
+
     logger.info(f"Using ruleset: {ruleset_path}")
 
     # 분석 실행
     try:
-        analyze_repository_parallel(
-            repo_location=args.repo_location,
-            output_dir_base=output_dir_base,
-            pmd_path="/app/pmd-daemon.jar",
-            ruleset=ruleset_path,
-            aux_classpath=aux_classpath,
-            num_workers=args.workers
-        )
-    except Exception as e:
-        logger.critical(f"A critical error occurred: {e}", exc_info=True)
+        analyze_repository_parallel(repo_location=args.repo_location, output_dir_base=output_dir_base,
+                                    pmd_path="/app/pmd-daemon.jar", ruleset=ruleset_path, aux_classpath=aux_classpath,
+                                    num_workers=args.workers, extra_pmd_flags=build_pmd_flags(args))
+    except subprocess.CalledProcessError as cpe:
+        if cpe.returncode == 4:  # only processing errors
+            logger.warning("PMD processing errors encountered (exit 4) – continuing.")
+        else:
+            raise
+    except Exception:
+        logger.exception("Fatal error")
         exit(1)
+
 
 if __name__ == "__main__":
     main()

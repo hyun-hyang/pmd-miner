@@ -31,12 +31,11 @@ docker build --no-cache -t pmd-analyzer-daemon .
 # 개발용 이미지로 실행 예시 (PowerShell 형식)
 docker run --rm `
   -v "${PWD}/analysis_results:/app/analysis_results" `
-  -p 8000:8000 `
   pmd-analyzer-dev `
   https://github.com/apache/commons-lang `
-  -r /rules/quickstart.xml `
-  -o /app/analysis_results `
-  -w 4
+  -r rules/quickstart.xml `
+  -o analysis_results `
+  --pmd-debug --strict-errors
 
 ```
 - --rm: 컨테이너 종료 시 자동 삭제
