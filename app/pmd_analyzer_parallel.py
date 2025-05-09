@@ -409,7 +409,8 @@ def analyze_repository_parallel(repo_location, output_dir_base, pmd_path, rulese
             run_command(['git', 'fetch', 'origin', '--prune'], cwd=base_repo_path, check=True)  # Add prune
             logger.info("Fetch complete.")
         except subprocess.CalledProcessError as e:
-            logger.error(f"Failed to fetch updates: {e.stderr}. Proceeding with existing local repo.")
+            logger.error(f"Checkout failed (code {e.returncode})")
+            logger.error("stderr:\n%s", e.stderr or "<empty>")
         except Exception as e:
             logger.error(f"Error fetching updates: {e}. Proceeding with existing local repo.")
     else:
