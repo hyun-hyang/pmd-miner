@@ -12,6 +12,7 @@ RUN mvn clean package dependency:copy-dependencies -DskipTests
 # -------- Runtime Stage --------
 FROM amazoncorretto:17-alpine-jdk
 LABEL authors="hyun-hyang"
+ENV GIT_OPTIONAL_LOCKS=0
 
 RUN apk update && \
     apk add --no-cache \
