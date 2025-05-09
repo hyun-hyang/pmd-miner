@@ -404,11 +404,9 @@ def analyze_repository_parallel(repo_location, output_dir_base, pmd_path, rulese
     file_cache.update(load_cache(cache_path))
 
     # --- Repository Setup ---
-    run_command(['git', 'worktree', 'prune'],
-                cwd=str(base_repo_path), check=False, suppress_stderr=True)
-
 
     if base_repo_path.exists() and (base_repo_path / ".git").is_dir():
+        run_command(['git', 'worktree', 'prune'], cwd = str(base_repo_path), check = False, suppress_stderr = True)
         logger.info(f"Base repository exists at {base_repo_path}. Fetching updates...")
         try:
             run_command(['git', 'fetch', 'origin', '--prune'], cwd=base_repo_path, check=True)  # Add prune
@@ -592,8 +590,9 @@ def analyze_repository_parallel(repo_location, output_dir_base, pmd_path, rulese
         if pool:
             pool.terminate()
     finally:
-        run_command(['git', 'worktree', 'prune'],
-                    cwd=str(base_repo_path), check=False, suppress_stderr=True)
+        if base_repo_path.exists() and (base_repo_path / ".git").is_dir():
+            run_command(['git', 'worktree', 'prune'],
+                        cwd=str(base_repo_path), check=False, suppress_stderr=True)
         if pool:
             pool.close()
             pool.join()
