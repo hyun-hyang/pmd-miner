@@ -173,20 +173,21 @@ def analyze_commit(commit_hash, prev_hash, base_repo_path, worktree_path, pmd_pa
     if result_file.exists() or error_file.exists():
         with progress_lock:
             progress_data['processed'] += 1
-        return commit_hash, 0.0, True, 0
+        return commit_hash, 0.0, True, 0, {}
 
     logger.info(f"[{worker_name}] - Processing commit {commit_short}")
 
     # Checkout
     try:
         with worktree_lock:
-            run_command(['git', 'checkout', '-f', commit_hash],
-                        cwd=worktree_path, suppress_stderr=True, check=True)
+            ok = safe_git_checkout(commit_hash, worktree_path, base_repo_path)
+            if not ok:
+                raise RuntimeError("git checkout failed after lock-cleanup retries")
     except Exception as e:
         logger.error(f"[{worker_name}] - Git checkout failed for {commit_short}: {e}")
         with open(error_file, 'w', encoding='utf-8') as f:
             json.dump({"commit": commit_hash, "error": "Git checkout failed"}, f, indent=2)
-        return commit_hash, 0.0, False, -1
+        return commit_hash, 0.0, False, -1, {}
 
     # Gather only changed Java files since previous commit
     if prev_hash:
@@ -210,7 +211,7 @@ def analyze_commit(commit_hash, prev_hash, base_repo_path, worktree_path, pmd_pa
             json.dump(placeholder, f, indent=2)
         with progress_lock:
             progress_data['processed'] += 1
-        return commit_hash, 0.0, True, 0
+        return commit_hash, 0.0, True, 0, {}
 
     # CACHE: 먼저 file_cache(Manager.dict)에서 해시 키로 결과 있는지 확인
     # merged_report 초기화: 실제 java_files 수, warnings 리스트 반영
@@ -265,7 +266,7 @@ def analyze_commit(commit_hash, prev_hash, base_repo_path, worktree_path, pmd_pa
         with progress_lock:
             progress_data['processed'] += 1
 
-        return commit_hash, 0.0, False, -1
+        return commit_hash, 0.0, False, -1, {}
 
     file_reports = raw.get("fileReports", raw.get("files", []))
 
@@ -398,6 +399,10 @@ def analyze_repository_parallel(repo_location, output_dir_base, pmd_path, rulese
     file_cache.update(load_cache(cache_path))
 
     # --- Repository Setup ---
+    run_command(['git', 'worktree', 'prune'],
+                cwd=str(base_repo_path), check=False, suppress_stderr=True)
+
+
     if base_repo_path.exists() and (base_repo_path / ".git").is_dir():
         logger.info(f"Base repository exists at {base_repo_path}. Fetching updates...")
         try:
@@ -581,6 +586,8 @@ def analyze_repository_parallel(repo_location, output_dir_base, pmd_path, rulese
         if pool:
             pool.terminate()
     finally:
+        run_command(['git', 'worktree', 'prune'],
+                    cwd=str(base_repo_path), check=False, suppress_stderr=True)
         if pool:
             pool.close()
             pool.join()
@@ -603,7 +610,7 @@ def analyze_repository_parallel(repo_location, output_dir_base, pmd_path, rulese
 
     end_overall_time = time.time()
     overall_duration = end_overall_time - start_overall_time
-    attempted_commits = successful_commits + pmd_failed_commits + git_failed_commits
+    attempted_commits = (skipped_commits + successful_commits + pmd_failed_commits + git_failed_commits)
     avg_time_successful = total_duration / successful_commits if successful_commits > 0 else 0
     avg_time_attempted = overall_duration / attempted_commits if attempted_commits > 0 else 0
 
@@ -668,6 +675,21 @@ def build_pmd_flags(args):
     if args.strict_errors:
         flags += ["--fail-on-processing-error"]
     return flags
+
+def safe_git_checkout(commit, wt_path, base_repo, retry=2):
+    lock = Path(base_repo) / '.git' / 'worktrees' / wt_path.name / 'index.lock'
+    for _ in range(retry + 1):
+        try:
+            run_command(['git','checkout','-f',commit], cwd=wt_path,
+                        suppress_stderr=True, check=True)
+            return True
+        except subprocess.CalledProcessError as e:
+            if 'index.lock' in (e.stderr or '') and lock.exists():
+                lock.unlink(missing_ok=True)
+                time.sleep(0.3)
+            else:
+                raise
+    return False
 
 
 def main():
