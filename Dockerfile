@@ -16,6 +16,7 @@ ENV GIT_OPTIONAL_LOCKS=0
 
 RUN apk update && \
     apk add --no-cache \
+      git \
       python3 \
       py3-pip \
       bash \

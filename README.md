@@ -29,7 +29,7 @@
 
 ```bash
 # 캐시 없이 최신 소스로 이미지 빌드
-docker build --no-cache -t pmd-analyzer:dev .
+docker build --no-cache -t pmd-analyzer .
 ```
 
 ### 3. 실행 방법
@@ -40,10 +40,11 @@ docker build --no-cache -t pmd-analyzer:dev .
 # 개발용 이미지로 실행 예시 (PowerShell 형식)
 docker run --rm `
   -v "${PWD}/analysis_results:/app/analysis_results" `
-  pmd-analyzer-dev `
+  pmd-analyzer `
   https://github.com/apache/commons-lang `
   -r rules/quickstart.xml `
   -o analysis_results `
+  -w 8
 
 ```
 > **필수 옵션 요약**
