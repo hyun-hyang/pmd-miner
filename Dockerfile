@@ -34,7 +34,7 @@ COPY --from=builder /build/rules/quickstart.xml                     ./rules/quic
 EXPOSE 8000
 
 ENTRYPOINT ["sh","-c", "\
-  java -cp \"pmd-daemon.jar:/opt/libs/*\" com.yourorg.pmd.PmdDaemon \
+  java -cp 'pmd-daemon.jar:/opt/libs/*' com.yourorg.pmd.PmdDaemon \
     --listen --port 8000 --cache /app/pmd-cache.dat --ignore-errors & \
   sleep 2 && exec python3 pmd_analyzer_parallel.py \"$@\" \
 ","--"]
